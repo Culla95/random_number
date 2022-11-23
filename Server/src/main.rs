@@ -1,30 +1,22 @@
 use std::collections::HashSet;
-use std::fs::File;
-use std::io::Write;
 use std::{
-    collections::HashMap,
-    fs,
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::fs::OpenOptions;
 use tokio::io::BufReader;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufWriter};
 use tokio::time::{self};
 
 #[tokio::main]
 async fn main() {
-    let path = "uniques.log";
-    if std::path::Path::new(path).exists() {
-        fs::remove_file(path).unwrap();
-    }
-
-    let output_file = File::create(path).expect("Error creating file");
     let total_unique_numbers = Arc::new(Mutex::new(HashSet::<u32>::new()));
     let connected_clients: Arc<Mutex<u8>> = Arc::new(Mutex::new(0));
     let tried_numbers: Arc<Mutex<HashSet<u32>>> = Arc::new(Mutex::new(HashSet::<u32>::new()));
     let new_unique_numbers: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
     let repeated_numbers: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
-    let _hola = tokio::join!(
+
+    tokio::join!(
         listen(connected_clients.clone(), tried_numbers.clone()),
         data_printing(
             connected_clients.clone(),
@@ -35,7 +27,6 @@ async fn main() {
         update_file(
             tried_numbers.clone(),
             total_unique_numbers.clone(),
-            output_file,
             new_unique_numbers.clone(),
             repeated_numbers.clone()
         )
@@ -57,12 +48,10 @@ async fn process_socket(
             socket.shutdown().await.unwrap();
             break;
         }
-        let input = line_read;
-        let input = input[..input.len() - 1].to_string();
-
+        let input = line_read.trim_end();
         match input.parse::<u32>() {
             Ok(rand_number) => {
-                if rand_number >= 100 && rand_number < 1000000000 {
+                if rand_number < 1000000000 {
                     tried_numbers.lock().unwrap().insert(rand_number);
                 } else {
                     *connected_clients.lock().unwrap() -= 1;
@@ -114,34 +103,65 @@ async fn listen(connected_clients: Arc<Mutex<u8>>, tried_numbers: Arc<Mutex<Hash
             let (mut socket, _) = listener.accept().await.unwrap();
             let connected_clients = connected_clients.clone();
             let tried_numbers = tried_numbers.clone();
-            
+
             if *connected_clients.lock().unwrap() >= 5 {
-                socket.shutdown();
-            }else{
+                socket.shutdown().await;
+            } else {
                 tokio::spawn(async move {
                     *connected_clients.lock().unwrap() += 1;
                     process_socket(connected_clients, tried_numbers, socket).await;
                 });
             }
-            
         }
-
     });
-    
 }
 
 async fn update_file(
     tried_numbers: Arc<Mutex<HashSet<u32>>>,
     total_unique_numbers: Arc<Mutex<HashSet<u32>>>,
-    mut output_file: File,
     new_unique_numbers: Arc<Mutex<u32>>,
     repeated_numbers: Arc<Mutex<u32>>,
 ) {
+    /*let Ok(output_file) = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open("uniques.log").await else {
+            panic!("Failed to open the file")
+        };
+    let total_unique_numbers = total_unique_numbers.clone();
+    let new_unique_numbers = new_unique_numbers.clone();
+    let repeated_numbers = repeated_numbers.clone();
+    let mut timer = time::interval(Duration::from_micros(100));
+    let mut writer = tokio::io::BufWriter::new(output_file);
+
+    while let Some(number) = rx_numbers.recv().await {
+        if !total_unique_numbers.lock().unwrap().contains(&number) {
+            *new_unique_numbers.lock().unwrap() += 1;
+            total_unique_numbers.lock().unwrap().insert(number);
+            let mut number= number.to_string();
+            number.push_str("/n");
+            writer.write_all(number.as_bytes()).await.expect("Failed to write into file");
+            writer.flush().await.expect("Failed to flush writer buffer")
+        } else {
+            *repeated_numbers.lock().unwrap() += 1;
+        }
+    }*/
+    let Ok(output_file) = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true) 
+        .open("uniques.log").await else {
+            panic!("Failed to open the file")
+        };
+    let mut writer = BufWriter::new(output_file);
     let tried_numbers = tried_numbers.clone();
     let total_unique_numbers = total_unique_numbers.clone();
     let new_unique_numbers = new_unique_numbers.clone();
     let repeated_numbers = repeated_numbers.clone();
-    let mut timer = time::interval(Duration::from_nanos(100));
+    let mut timer = time::interval(Duration::from_micros(100));
     loop {
         timer.tick().await;
         if tried_numbers.lock().unwrap().len() > 0 {
@@ -157,7 +177,7 @@ async fn update_file(
                 }
             }
             tried_numbers.lock().unwrap().clear();
-            output_file.write(output.as_bytes()).unwrap();// utilizar buffer
+            writer.write(output.as_bytes()).await; // utilizar buffer
         }
     }
 }
