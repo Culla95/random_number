@@ -12,7 +12,7 @@ use tokio::time::{self};
 async fn main() {
     let total_unique_numbers = Arc::new(Mutex::new(HashSet::<u32>::new()));
     let connected_clients: Arc<Mutex<u8>> = Arc::new(Mutex::new(0));
-    let tried_numbers: Arc<Mutex<HashSet<u32>>> = Arc::new(Mutex::new(HashSet::<u32>::new()));
+    let tried_numbers: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::<u32>::new()));
     let new_unique_numbers: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
     let repeated_numbers: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
 
@@ -35,7 +35,7 @@ async fn main() {
 
 async fn process_socket(
     connected_clients: Arc<Mutex<u8>>,
-    tried_numbers: Arc<Mutex<HashSet<u32>>>,
+    tried_numbers: Arc<Mutex<Vec<u32>>>,
     mut socket: tokio::net::TcpStream,
 ) {
     let (sread, _swrite) = socket.split();
@@ -52,7 +52,7 @@ async fn process_socket(
         match input.parse::<u32>() {
             Ok(rand_number) => {
                 if rand_number < 1000000000 {
-                    tried_numbers.lock().unwrap().insert(rand_number);
+                    tried_numbers.lock().unwrap().push(rand_number);
                 } else {
                     *connected_clients.lock().unwrap() -= 1;
                     break;
@@ -93,7 +93,7 @@ async fn data_printing(
     }
 }
 
-async fn listen(connected_clients: Arc<Mutex<u8>>, tried_numbers: Arc<Mutex<HashSet<u32>>>) {
+async fn listen(connected_clients: Arc<Mutex<u8>>, tried_numbers: Arc<Mutex<Vec<u32>>>) {
     let listener = tokio::net::TcpListener::bind("localhost:8881")
         .await
         .unwrap();
@@ -105,7 +105,7 @@ async fn listen(connected_clients: Arc<Mutex<u8>>, tried_numbers: Arc<Mutex<Hash
             let tried_numbers = tried_numbers.clone();
 
             if *connected_clients.lock().unwrap() >= 5 {
-                socket.shutdown().await;
+                socket.shutdown().await.unwrap();
             } else {
                 tokio::spawn(async move {
                     *connected_clients.lock().unwrap() += 1;
@@ -117,7 +117,7 @@ async fn listen(connected_clients: Arc<Mutex<u8>>, tried_numbers: Arc<Mutex<Hash
 }
 
 async fn update_file(
-    tried_numbers: Arc<Mutex<HashSet<u32>>>,
+    tried_numbers: Arc<Mutex<Vec<u32>>>,
     total_unique_numbers: Arc<Mutex<HashSet<u32>>>,
     new_unique_numbers: Arc<Mutex<u32>>,
     repeated_numbers: Arc<Mutex<u32>>,
@@ -152,7 +152,7 @@ async fn update_file(
         .read(true)
         .write(true)
         .create(true)
-        .truncate(true) 
+        .truncate(true)
         .open("uniques.log").await else {
             panic!("Failed to open the file")
         };
